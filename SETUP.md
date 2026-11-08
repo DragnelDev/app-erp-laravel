@@ -1,77 +1,40 @@
-# Setup local (backend-erp)
+# Setup local
 
-## Paso 1 — Entorno
+## Puesta en marcha
+
 ```bash
-cp .env.example .env
-# Editar .env: DB_DATABASE, DB_USERNAME, DB_PASSWORD (PostgreSQL local)
+cp .env.example .env          # completar DB_DATABASE, DB_USERNAME, DB_PASSWORD (PostgreSQL local)
 composer install
 php artisan key:generate
-php artisan migrate        # verifica la conexión a PostgreSQL
-```
-
-## Paso 2a — Autenticación (Breeze: Vue + Inertia + TypeScript + Pest + dark)
-```bash
-composer require laravel/breeze --dev
-php artisan breeze:install vue --typescript --pest --dark
-php artisan migrate
+php artisan migrate:fresh --seed   # solo en local: crea empresas, roles y usuarios de prueba
 npm install
-npm run build
+npm run build                      # necesario antes de correr los tests (manifest de Vite)
 php artisan test
-```
-Luego, en Breeze, eliminar la ruta pública de registro (los usuarios los crea un administrador).
-
-## Paso 2b — RBAC (Spatie con teams = empresa)
-Orden importante. Hacerlo después del paso 2a (Breeze).
-
-1. Instalar y publicar:
-```bash
-composer require spatie/laravel-permission
-php artisan vendor:publish --provider="Spatie\Permission\PermissionServiceProvider"
-```
-2. En `config/permission.php`:
-```php
-'teams' => true,
-'column_names' => [
-    // ...
-    'team_foreign_key' => 'company_id',
-],
-```
-3. En la migración publicada de Spatie, agregar la FK a `companies` en las 3 tablas que usan el equipo
-   (`roles`, `model_has_permissions`, `model_has_roles`), junto a la columna `$columnNames['team_foreign_key']`:
-```php
-$table->foreign($columnNames['team_foreign_key'])->references('id')->on('companies')->cascadeOnDelete();
-```
-   (la columna en `roles` es nullable; la FK sigue siendo válida).
-4. Registrar el middleware en `bootstrap/app.php`, dentro de `->withMiddleware(...)`
-   (si Breeze ya agregó `$middleware->web(append: [...])`, añadir la clase a esa lista):
-```php
-$middleware->web(append: [\App\Http\Middleware\SetCurrentCompany::class]);
-$middleware->prependToPriorityList(
-    before: \Illuminate\Routing\Middleware\SubstituteBindings::class,
-    prepend: \App\Http\Middleware\SetCurrentCompany::class,
-);
-```
-5. Ruta para cambiar de empresa (dentro del grupo `auth` de `routes/web.php`):
-```php
-Route::post('/company/{company}/switch', \App\Http\Controllers\CompanySwitchController::class)->name('company.switch');
-```
-6. Migrar y sembrar (solo entorno local):
-```bash
-php artisan migrate
-php artisan db:seed
+composer run dev                   # o: php artisan serve + npm run dev
 ```
 
-### Usuarios de prueba (contraseña `password`)
-| Email | Rol | Sucursales |
-|---|---|---|
-| admin.general@demo.test | Administrador General (2 empresas) | todas |
-| admin.sucursal@demo.test | Administrador de Sucursal | Norte |
-| ventas@demo.test | Ventas | Matriz, Norte |
-| almacen@demo.test | Almacén | Matriz |
-| contabilidad@demo.test | Contabilidad | Matriz, Norte |
-| rrhh@demo.test | RRHH | Matriz, Norte |
+## Usuarios de prueba (contraseña `password`)
 
-### Cómo usar el aislamiento en modelos nuevos
-- Por empresa (clientes, productos, categorías): `use BelongsToCompany;` y columna `company_id`.
-- Por sucursal (almacenes, ventas, movimientos de stock): además `use BelongsToBranch;` y columna `branch_id`.
-- Acceso a todas las sucursales = permiso `sucursales.acceso_total` (lo tiene el Administrador General).
+| Email                    | Rol                                | Sucursales    |
+| ------------------------ | ---------------------------------- | ------------- |
+| admin.general@demo.test  | Administrador General (2 empresas) | todas         |
+| admin.sucursal@demo.test | Administrador de Sucursal          | Norte         |
+| ventas@demo.test         | Ventas                             | Matriz, Norte |
+| almacen@demo.test        | Almacén                            | Matriz        |
+| contabilidad@demo.test   | Contabilidad                       | Matriz, Norte |
+| rrhh@demo.test           | RRHH                               | Matriz, Norte |
+
+## Multiempresa / sucursales
+
+- Spatie `teams` = empresa (`company_id`). Roles por empresa; permisos globales con formato `modulo.accion`.
+- Catálogo de permisos y roles: `app/Support/Rbac/PermissionCatalog.php`. Al crear una empresa, usar `SyncCompanyRoles`.
+- Aislamiento en modelos nuevos: `BelongsToCompany` (clientes, productos, categorías) y además `BelongsToBranch`
+  (almacenes, ventas, movimientos de stock). Acceso a todas las sucursales = permiso `sucursales.acceso_total`.
+
+## UI
+
+- Tailwind 3 (Breeze) con `darkMode: 'class'`. Paleta 60-30-10: slate (neutros/superficies) + blue (acento) + emerald/rose (estados).
+- Tema: `composables/useTheme.ts` (claro/oscuro/sistema, `localStorage: theme`), script anti-parpadeo en `resources/views/app.blade.php`.
+- Navegación: `resources/js/config/navigation.ts` alimenta el sidebar y el buscador Cmd/Ctrl+K (filtrado por permisos).
+- Componentes: `Card`, `StatusBadge` (Borrador/Facturado/Anulado), `Skeleton`/`PageSkeleton`, `FormField`, `ToastContainer`
+    - `useToast()`. Los mensajes `success`/`error`/`info` en la sesión flash se muestran como toasts.
